@@ -4,4 +4,10 @@ Here you can find a list of relevant literature on the topic of psychological re
 
 You will also find a number of R Markdown scripts for the course:
 
+- basic_sr_demo.Rmd
 
+- basic_sr_worksheet.Rmd
+
+- advanced_sr_demo.Rmd
+
+- advanced_sr_worksheet.Rmd
