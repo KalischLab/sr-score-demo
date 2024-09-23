@@ -1,0 +1,1373 @@
+---
+title: "advanced_sr"
+author: "Lara Puhlmann (Papoula Petri-Romão for Part A: basic sr section)"
+date: "2024-08-29"
+output: 
+  html_document:
+    toc: true
+    toc_float:
+      collapsed: true
+    toc_depth: 3
+    number_sections: false
+    theme: lumen
+---
+
+
+Note: this is the advanced sr script.
+
+For your convenience, the "basic_sr" script is included again, as it forms the basis for the advanced calculations.
+
+To start with the advanced calculations, you can run everything up to "Part B".
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE)
+
+# This is the "setup" chunk. It is best practice to specify all the packages you will use here.
+
+# the pacman package allows you to manage packages easily, since it will install any packages you don't have and simply load those packages you do have
+require(pacman)
+
+# now load packages
+p_load(
+  tidyverse, # for data management
+  lme4, # for multilevel modelling
+  ggcorrplot, # for plotting correlations
+  ggsignif,
+  plyr
+)
+
+# source a function to winsorize from LP 
+source("./winsorize.r") 
+
+# for r version 4.0.4. manually install esmpack and load broom.mixed
+remotes::install_github("wviechtb/esmpack")
+library("esmpack")
+
+```
+
+
+We are using the publically available [Dynacore-L dataset available on OSF](https://osf.io/d6wgr/). The main analyses of this dataset were published by [Boegemann et al. in 2022](https://mental.jmir.org/2023/1/e46518). The calculations here will slightly differ from these main analyses for the purpose of exemplifying SR calculation. 
+
+We have processed the data set to be a bit easier to work with for the purpose of this workshop, but the data remains the same. 
+
+You will find the ressymp_workshop data on our github. 
+
+You will have calculated the necessary variables that form the basis for this advanced script from the "basic_sr" script 
+
+```{r loaddata}
+
+ds <- read_csv("ressymp_workshop.csv")
+
+```
+
+# Basic SR score
+
+The "Stressor Reactivity" is the reaction as expressed in mental health problems (P) to stressors (E). Therefore you need to identify the stressor exposure measures (E) and measures of mental health problems/symptoms in your dataset (P). 
+
+## 1 Identify your E and P 
+
+In Dynacore-L we have two types of stressors, Corona-related stressors and General stressors. 
+
+* CE : Corona-related stressors, 29 items; 0-5, 0= did not happen. 
+* GE : General stressors, 11 items; 0-5, 0= did not happen. 
+
+CE_30 and GE_12 are open questions and are not used for this scoring. 
+
+      Task 1a: Find stressor items in the dataset and look at this subset. Check that the range of the items is as expected. 
+      
+```{r solution_identify_E}
+
+# there are many acceptable solutions, this is the dplyr way
+ds %>% 
+  dplyr::select(
+    starts_with(
+      c("GE_", "CE_")
+      )
+    ) %>% 
+  # head returns the first 10 columns of the subset
+  head
+
+# summary return min, max, quartiles, median and mean
+ds %>% 
+  dplyr::select(starts_with(c("GE_", "CE_"))) %>% 
+  summary()
+
+```
+
+As P we have the GHQ (CM in the dataset). 
+
+CM : 0-3, where 0 is did not happen.
+
+      Task 1b: Find mental health items in the dataset and look at this subset. Check that the range of the items is expected. 
+      
+```{r solution_identify_P}
+
+# there are many acceptable solutions, this is the dplyr way
+ds %>% 
+  dplyr::select(
+    starts_with("CM")
+  ) %>% 
+  # head returns the first 10 columns of the subset
+  head
+
+ds %>% 
+  dplyr::select(
+    starts_with("CM")
+  ) %>% 
+  # summary returns min, max, quartiles, median and mean
+  summary()
+
+```
+
+
+### 1.1 building sum scores
+
+#### 1.1.1 P
+
+Score your P according to the manual. 
+For GHQ this is a sum score of all items. 
+
+      Task 1.1.1a: Calculate the sum score of GHQ (P)
+      
+```{r solution_p_sumscore}
+
+ds <- ds %>% 
+  # mutate allows us to create a new variable
+  dplyr::mutate(
+    # we name this new variable P & calculate the Sum per row
+    P=base::rowSums(
+      # with across we specify what columns are summed
+      across(c(CM_01:CM_12)),
+      # here we specify that if there is an NA value it is removed
+      na.rm = T)
+                )
+
+```
+
+
+#### 1.1.2 E
+
+Dependent on your data set you might have different considerations on how you will build your E sum score.
+
+If you have different type of stressors within the same data set, for example, life events and daily hassles, or general and pandemic stressors, you will in most cases want to built separate sum scores for each type of stressor first. 
+
+      Task 1.1.2a: Create two sum scores, one for the general stressors (Eg), one for the corona-related stressors (Ec). 
+      
+```{r solutions_ec_eg}
+
+ds <- ds %>% 
+  # mutate allows us to create a new variable
+  dplyr::mutate(
+    # we name this new variable Eg & calculate the Sum per row
+    Eg=base::rowSums(
+      # with across we specify what columns are summed
+      across(c(GE_01:GE_11)),
+      # here we specify that if there is an NA value it is removed
+      na.rm = T),
+    # now we calculate a separate E for the pandemic stressors
+    Ec=base::rowSums(
+      # with across we specify what columns are summed
+      across(c(CE_01:CE_29)),
+      # here we specify that if there is an NA value it is removed
+      na.rm = T)
+                )
+
+```
+
+
+#### 1.1.3 to scale or not to scale?
+
+Now the question is how could one combine the E scores. Usually, you want to built the SR score based on the most information available, meaning all types of available stressors. There are two options: you could simply sum all items)
+
+1. you could sum all items. This works when all stressors are measured or coded the same way (for example all of them indicate occurrence). This would mean that if the type of stressors are not equally represented, the one type for which there are more items will be weighted more. In our example, there are more CE (29 items) then general stressors (11 items). 
+2. you could create a mean of the scaled sum scores. this would allow both type of stressors to be equally weighted. This is the approach we have used in MARP and LORA which is described in the [FRESHMO paper](https://www.frontiersin.org/articles/10.3389/fpsyg.2021.710493). 
+
+      Task 1.1.3: create a scaled combined E score (E_scaled)
+
+```{r solution_scaled_E}
+
+ds <- ds  %>% 
+  ungroup %>% 
+  # here we are scaling across all time points and all participants
+  mutate(Eg_scaled= scale(Eg),
+         Ec_scaled=scale(Ec)) %>% 
+dplyr::group_by(subject.ID) %>% 
+  # because we are creating the mean by rows and not by column
+  rowwise() %>% 
+  dplyr::mutate(E_scaled=mean(c(Eg_scaled,Ec_scaled),na.rm = T))%>% 
+  # this is important to make revert the rowwise operator
+  ungroup %>%  
+  dplyr::group_by(subject.ID) 
+```
+
+      
+#### 1.1.4 per timepoint/over time periods
+
+SR is expected to be quite stable and change over longer periods of times. That is a sudden or short change in SR is usually not indicative of less resilient outcomes, rather it is the SR over longer time periods that is more informative on the resilience of participants. 
+Consequently, in longitudinal studies we are often interested in longer time periods rather than single time points. For example in the longitudinal samples MARP and LORA we look at period of 9 months to ca. 3.5 years [see Petri-Romão et al.](https://osf.io/dgx4k). 
+For this purpose we create the mean stressor exposure and mean P in the time period of interest. 
+
+      Task 1.1.4a: Create mean E scores (Eg_t1.t6, Ec_t1.t6) across all timepoints
+      
+```{r solution_Et1_t6}
+
+ds <- ds %>% 
+  group_by(subject.ID) %>% 
+  mutate(
+    Eg_t1.t6 = base::mean(
+      # we mean the already calculated sum score
+      Eg,
+      # here we specify that if there is an NA value it is removed
+      na.rm = T),
+    # now we calculate a separate E for the pandemic stressors
+    Ec_t1.t6 =base::mean(
+      Ec,
+      # here we specify that if there is an NA value it is removed
+      na.rm = T)
+  ) 
+
+```
+
+      Task 1.1.4b: Create mean P scores (P_t1.t6) across all timepoints
+      
+```{r solution_Pt1_t6}
+
+ds <- ds %>% 
+  group_by(subject.ID) %>% 
+  mutate(
+    P_t1.t6 = base::mean(
+      # we mean the already calculated sum score
+      P,
+      # here we specify that if there is an NA value it is removed
+      na.rm = T)
+  ) 
+
+```
+
+In the case of the combined E score the order of operations is as follows
+
+1. create mean sum scores for each time period (separately for Eg, Ec)
+2. scale each separate sum score. This means we are scaling over the time period of interest
+3. create combined mean score of the scaled scores
+
+      Task 1.1.4c: Create combined E scores over the whole time period E_t1.t6, E_t1.t6_scaled
+      
+```{r solution_Et1_t6_scaled}
+
+ds <- ds %>% 
+  group_by(subject.ID) %>% 
+  # first we create a mean of the simple combined sum score
+  mutate(E_t1.t6 = base::mean(E, na.rm=TRUE)) %>% 
+    ungroup() %>% 
+  # now we create an equally weighted E mean score over t1 to t6
+  mutate(
+    Eg_t1.t6_scaled = scale(
+      # we mean the already calculated sum score (see previous chunk)
+      Eg_t1.t6),
+    # now we calculate a separate E for the pandemic stressors
+    Ec_t1.t6_scaled = scale(
+      Ec_t1.t6)
+  ) %>% 
+  # now we create a combined mean score
+  group_by(subject.ID) %>% 
+  mutate(
+    E_t1.t6_scaled = base::mean(c(Eg_t1.t6_scaled, Ec_t1.t6_scaled), na.rm=TRUE)
+  )
+
+```
+
+### 1.2 first look into E and P
+
+First we check that our scores are reasonable. Plotting and summarising the scores makes sense to check that you have done everything correctly and give you a sense if there are outliers. We will not look into the treatment of outliers now, but as good practice you should get used to plotting and checking your data.
+
+      Task 1.2a: Describe the scores
+      Generate descriptive statistics of the scores you build to check their quality. (e.g. mean, median, min, max)
+      EXTRA: plot the scores. (e.g. scatter, histogram, boxplot...)
+      
+      Task 1.2b: Interpret your results
+      * did you do everything correctly? 
+      * do you think there are outliers?
+
+```{r solution_describeEP}
+# skimr::skim offers a quick look into each variable
+ds %>% 
+  ungroup() %>% 
+  # select the variables you want to look at 
+  select(E,E_scaled, Ec, Eg, E_t1.t6, Ec_t1.t6, Eg_t1.t6,E_t1.t6_scaled, Ec_t1.t6_scaled, Eg_t1.t6_scaled, P) %>% 
+  skimr::skim()
+
+## Plotting ###
+
+ds %>% 
+  group_by(subject.ID) %>% 
+  select(subject.ID,E,E_scaled, Ec, Eg, E_t1.t6, Ec_t1.t6, Eg_t1.t6,E_t1.t6_scaled, Ec_t1.t6_scaled, Eg_t1.t6_scaled, P) %>% 
+  # we need to reformat the dataset for easier plotting in ggplot, but you can also skip this if you want to plot them separately
+  pivot_longer(-subject.ID) %>% 
+  # plotting happens here
+  ggplot(aes(y=value))+
+  # we choose the kind of plot
+  geom_boxplot()+
+  # this creates separate plot for each variable. scales=free adjusts the axes for each plot individually
+  facet_wrap(~name, scales = "free")
+
+
+```
+
+
+
+### 1.3 Choosing E 
+
+We want to choose an E score based on a robust (that is high and interpretable) relationship with P. 
+
+      Task 1.3a: Calculate the correlations between E an P 
+      Calculate them between all scores or just one, depending on your knowledge of coding.
+      EXTRA: plot the correlation matrix for easy interpretation.
+
+      Task 1.3b: Interpret the scores
+      * which E score has the highest correlation with P?
+      * what do the separate E scores' correlations tell you about their influence on P? (is Eg or Ec more important)
+      * does the scaling have an impact on the relationship?
+      * what could be a reason to choose separate scores rather than combined scores?
+      * which E score would you use?
+
+
+
+```{r solution_choosingE}
+# here we just calculate all the different correlations
+ds %>%  
+  ungroup() %>% 
+  select(E,E_scaled, Ec, Eg, P) %>% 
+  cor(., use="pairwise.complete.obs")
+
+# here we plot the correlations with ggcorrplot
+ds %>%  
+  ungroup() %>% 
+  select(E,E_scaled, Ec, Eg, P) %>% 
+  cor(., use="pairwise.complete.obs")%>%  
+  ggcorrplot::ggcorrplot(
+                          show.legend = TRUE, type="lower", method = "circle", lab=TRUE,
+                          ggtheme = ggplot2::theme_classic)
+
+# here we calculate the correlations of the average E and P in t1-t6
+ds %>%  
+  ungroup() %>% 
+  select(E_t1.t6, Ec_t1.t6, Eg_t1.t6,E_t1.t6_scaled, P_t1.t6) %>% 
+  cor(., use="pairwise.complete.obs")
+
+# here we plot again
+ds %>%  
+  ungroup() %>% 
+  select(E_t1.t6, Ec_t1.t6, Eg_t1.t6,E_t1.t6_scaled, P_t1.t6)%>%  
+  stats::cor(., use = "pairwise.complete.obs") %>%  
+  ggcorrplot::ggcorrplot(
+                          show.legend = TRUE, type="lower", method = "circle", lab=TRUE,
+                          ggtheme = ggplot2::theme_classic)
+```
+
+Solution:
+
+* which E score has the highest correlation with P?
+_E_scaled has the highest relationship with P. E_t1.t6_scaled has the highest correlation with P_t1.t6_
+
+* what do the separate E scores' correlations tell you about their influence on P? (is Eg or Ec more important)
+_Ec has lower relationship with P than Eg. But Ec has a higher correlation with E, which makes sense, since there are more items that go into E._ 
+
+* does the scaling have an impact on the relationship?
+_Eg and Ec are equally correlated with E_scaled, which makes sense, since they are now equally weighted. Scaling actually increases the correlation with P_
+
+* what could be a reason to choose separate scores rather than combined scores?
+_in specific times, such as the pandemic, we might have hypotheses regarding the differential impact of distinct type of stressors on P_
+
+* which E score would you use?
+_for simplicity we will proceed with E and E_t1.t6 without scaling_
+
+## 2 Model for normative stressor reactivity
+
+The basis of the SR score for each individual is the presumed normative relationship between E and P, that is the normative reactivity in terms of mental health problems to the exposure of stressors. 
+In this part we will calculate the normative E~P line. 
+
+Usual considerations
+
+* use all available data in completed studies
+* pre-define acceptable amount of incomplete assessments (e.g. participants must have completed 2/3 assessments)
+* you will usually need multiple time points
+
+### 2.1 multilevel vs simple modelling
+
+In cross-sectional samples you will always have to use simple modelling. 
+However, in longitudinal samples you can either use multilevel modelling or choose to average over all time points to use simple modelling. The resulting SR scores usually are highly correlated and it is mostly a conceptual distinction. 
+
+In ongoing studies we have so far used the second appraoch, that is averaging over time points and building simple models. 
+
+In studies where you compare different time points, for example intervention studies, we have chosen multilevel modelling (see [Petri-Romão et al. (2024)](https://osf.io/dgx4k))
+
+#### 2.1.1 simple modelling
+
+In a cross-sectional study or if computing the normative EP line in a single timepoint you will always use a simple model. 
+
+For this you will define your P of interest (your predicted variable y) and your E in the corresponding time period (your x). 
+
+For the sake of this example we will look at the average mental health problems over all assessments (P_t1.t6) and average stressor exposure in that time period (E_t1.t6). 
+
+      Task 2.1.1a Build a simple linear model predicting P with E. Save the summary output in an object. 
+
+
+```{r solution_simplemodel}
+
+
+EP_norm <- ds %>% 
+  # we first specify the model
+  lm(P_t1.t6~E_t1.t6, data=.) %>% 
+  # then we save the summary in an object we name EP_norm
+  summary()
+
+EP_norm
+  
+
+```
+
+
+#### 2.1.2 multilevel modelling
+
+Multilevel modelling allows us to build models with repeated measures of E and P. 
+It has been used in Dynacore-L and the RESPOND-RCT intervention study. 
+It is particularly useful when the study is completed and if averaging would obscure the effect of interest. 
+
+      Task 2.1.2 Build a multilevel model with the lmer function, specifying a random intercept for each subject. Save the output summary in an object. 
+      
+```{r solution_multilevel}
+
+EP_multi <- ds %>% 
+  # to create a multilevel model we must specify that there are repeated measurements for each participant. For this we group the dataframe
+  group_by(subject.ID) %>% 
+  # specify a model with a random effect for each subject
+  lme4::lmer(scale(P)~scale(E)+ (1+scale(E)|subject.ID),data=.) %>% 
+  summary()
+
+EP_multi
+  
+```
+
+
+### 2.2 linear vs quadratic
+
+As specified in the FRESHMO paper [Kalisch et al.](https://www.frontiersin.org/articles/10.3389/fpsyg.2021.710493), the relationship between E and P is mostly linear, but could also be quadratic. 
+It is best practice to test whether the linear or quadratic relationship is the best fit. 
+
+      Task 2.2 Test wether the E/P relationship is best described with a linear or quadratic model. This is best done with an anova. Interpret the result. You can do so with the simple or multilevel models. 
+
+```{r solution_linquad}
+# when comparing models it's important that you build them with the same syntax, so that the anova understands that they are comparable
+
+# building the linear model 
+EP_lin <- ds%>%
+  group_by(subject.ID) %>%
+lm(P_t1.t6~poly(E_t1.t6,1, raw =TRUE),data=.) 
+
+# building the quadratic model
+EP_quad <- ds%>%
+  group_by(subject.ID) %>%
+lm(P_t1.t6~poly(E_t1.t6,2, raw =TRUE),data=.) 
+
+# run an anova comparing the model
+anova(EP_lin, EP_quad,test="Chisq")
+# The anova comes back with a stat. signif. difference between the models, saying that the quadratic model is stat. better than the linear one. 
+
+
+#### multilevel ###
+
+# building the linear model 
+EP_lin_multi <- ds%>%
+  group_by(subject.ID) %>%
+  lme4::lmer(scale(P)~poly(scale(E),1, raw = TRUE)+(1+scale(E)|subject.ID),data=.)
+
+# building the quadratic model
+EP_quad_multi <- ds%>%
+  group_by(subject.ID) %>%
+lme4::lmer(scale(P)~poly(scale(E),2, raw = TRUE)+(1+scale(E)|subject.ID),data=.)
+
+# run an anova comparing the model
+anova(EP_lin_multi, EP_quad_multi,test="Chisq")
+# The anova says that there is no stat. signif. difference between the models
+```
+
+#### 2.2.1 plot 
+
+To further understand the relationship it can also be useful to plot the E/P lines. Here it would be possible to identify outliers as well (the treatment of outliers is explained in the next advanced part of the script)
+
+        Task 2.2.1 Plot the E/P relationship twice. Once with fitting a linear line and once fitting a quadratic line onto the squatterplot. 
+```{r solution_plotline}
+
+# plot a linear relationship
+plotlin <-  ds %>% 
+  ggplot(aes(x = E, y = P)) +
+  geom_point() +
+  labs(x="E", y="P") +
+  # adding an EP line based on linear modelling
+  geom_smooth(method = "lm")+
+  # this just makes it prettier
+  theme_classic()
+
+plotlin
+
+# plot a quadratic relationship
+plotquad <- ds %>% 
+  ggplot(aes(x = E, y = P)) +
+  geom_point() +
+  labs(x="E", y="P") +
+  # adding an EP line based on a quadratic relationship
+  geom_smooth(formula = y ~ poly(x, 2, raw=TRUE))+
+  theme_classic()
+
+plotquad
+```
+
+
+
+### 2.3 explained variance
+
+As a way of testing the quality of your model you can analyse the explained variance of the model
+
+      Task 2.3 Calculate the R2 of the linear and quadratic model we have just compared. 
+
+```{r solution_rsquared}
+# R squared of the linear model previously calculated
+summary(EP_lin)$adj.r.squared
+
+# R squared of the quadratic model previously calculated
+summary(EP_quad)$adj.r.squared
+```
+
+
+### 2.4 decide on model
+
+Things to consider
+
+*Are you interested in an average time period or single timepoints?
+*Is your study concluded or not?
+*Which model best describes the relationship (linear or quadratic?)
+*Are there outliers that could be affecting the fit? (See advanced script)
+
+## 3 calculate SR score 
+
+We will calculate different SR scores heres to showcase how the SR score is calculated. 
+
+### 3.1 single time points
+
+If you want to calculate SR scores for each assessment you need to base it on the multilevel model. Our assessment revealed, that the linear model best describes the relationship. 
+
+#### 3.1.1 extract intercept and slope
+
+We therefore need to extract the intercept and slope from the multilevel model.
+
+      Task 3.1.1 Save the intercept and slope from the multilevel model (2.1.2) in separate objects. 
+      
+```{r solution_slope}
+intercept_multi  <- EP_multi$coefficients[1]
+E_slope_multi  <- EP_multi$coefficients[2]
+```
+
+#### 3.1.2 predicted P
+
+We use the extracted intercept and slope to calculate the predicted P based on their E, using a linear equation (y=slope*x+intercept)
+
+The E in the equation needs to be scaled. 
+
+      Task 3.1.2 Calculate the predicted P based on a linear equation, store it as a variable in the dataset
+      
+```{r solution_predPmulti}
+ ds$P_pred_multi<- intercept_multi  + scale(ds$E)*E_slope_multi  
+```
+
+#### 3.1.3 SR score
+
+The SR score is then the difference between the actual P and the predicted P, that is the residual of each P to the normative E/P line. 
+
+      Task 3.1.3 Calculate the difference between actual P and predicted P for each participant
+      
+```{r solution_sr}
+ ds$SR<- scale(scale(ds$P) - ds$P_pred_multi)
+```
+
+### 3.2 over entire time period
+
+If we want an SR score over the entire time period than we calculate it on the basis on the model in 2.1.1. Our calculations, however, showed that the quadratic model is the best fit (2.2). 
+
+#### 3.2.1 extract intercept and slope
+First, we need to extract the intercept and slopes (in a quadratic model there are two slopes)
+
+```{r solution_slopeovertime}
+intercept_t1t6  <- EP_quad$coefficients[1]
+E_slope_b  <- EP_quad$coefficients[2]
+E_slope_a  <- EP_quad$coefficients[3]
+```
+
+#### 3.1.2 predicted P
+
+We then calculate the predicted P base on the quadratic equation. (y=slopeA*x^2+slopeB*x+intercept)
+
+      Task 3.1.2 Calculate the predicted P based on a quadratic equation, store it as a variable in the dataset
+
+```{r solution_predpovertime}
+ ds$P_t1.t6_pred <- intercept_t1t6  + scale(ds$E_t1.t6)*E_slope_b  + (scale(ds$E_t1.t6)^2)*E_slope_a  
+```
+
+#### 3.1.3 SR score
+
+We then again, calculate the difference between actual P and predicted P. 
+
+      Task 3.1.3 Calculate the difference between actual P and predicted P for each participant
+      
+```{r solution_srt1t6}
+ ds$SR_t1.t6<- scale(scale(ds$P_t1.t6) - ds$P_t1.t6_pred)
+```
+
+
+## 4 Why SR? - SR over time
+
+As an illustration as to why the SR score can offer valuable insights into resilience, we will now examine E, P and SR over time. 
+
+      Task 4: Plot E, P and SR over all 6 time points (separate plots for each variable). Then test the difference between time point 1 and time point 6 to see whether E, P and SR change significantly over time. (you could do this within your plot with ggsignif)
+
+```{r solution_sr-over-time}
+
+p_plot <-  ds %>%  
+  ggplot(
+    aes(
+      y = scale(P),
+      x = factor(beep),
+      fill = beep)
+    ) +
+  geom_boxplot() +
+  ggsignif::geom_signif(comparisons = list(c(1,6)), 
+                        test =  t.test, 
+                        map_signif_level = TRUE,
+                        step_increase = 0.055, 
+                        vjust = 0.4) +
+  xlab("time points")+
+  ylab("Mental health symptoms (GHQ-12)") +
+  theme(legend.position = "none",
+        axis.title = element_text(size = 15))
+
+e_plot <-  ds %>%  
+  ggplot(
+    aes(
+      y = scale(E),
+      x = factor(beep),
+      fill = beep)
+    ) +
+  geom_boxplot() +
+  ggsignif::geom_signif(comparisons = list(c(1,6)), 
+                        test =  t.test, 
+                        map_signif_level = TRUE,
+                        step_increase = 0.055, 
+                        vjust = 0.4) +
+  xlab("time points")+
+  ylab("Stressor exposure (E)") +
+  theme(legend.position = "none",
+        axis.title = element_text(size = 15))
+
+sr_plot <-  ds %>%  
+  ggplot(
+    aes(
+      y = SR,
+      x = factor(beep),
+      fill = beep)
+    ) +
+  geom_boxplot() +
+  ggsignif::geom_signif(comparisons = list(c(1,6)), 
+                        test =  t.test, 
+                        map_signif_level = TRUE,
+                        step_increase = 0.055, 
+                        vjust = 0.4) +
+  xlab("time points")+
+  ylab("Stressor reactivity (SR)") +
+  theme(legend.position = "none",
+        axis.title = element_text(size = 15))
+
+p_plot
+e_plot
+sr_plot
+
+ggpubr::ggarrange(p_plot, e_plot, sr_plot, nrow = 1)
+```
+
+We can see that the change and E and P are significant, but SR is not. Likely the changes in P are explained by changes in E, by controlling for E we can disentangle the causes of these changes.
+
+
+# Part B: SR Score advanced 
+    
+By now, you know how to build you basic SR score in cross-sectional and longitudinal studies. You also already know how to select the right E score and fit the optimal E-P line (linear or quadratic).
+
+In this section, you will explore ways to fine-tune your SR score to your study design (i.e., long-term studies with long measurement spacing; comprehensive stressor list or subsets of stressors) and collected data (Outliers and distributions). Many of these approaches are sample and study specific and it is often a custom decision which approach you will use for your sample
+
+For the advanced script, we continue working with P/P_t1.t6 and E/E_t1.t6
+
+We work with E for simplicity, but you can also work with E_scaled, which showed the strongest relationship to P.
+
+## 1 SR in long-term studies
+
+### 1.1 sliding windows
+
+Sometimes, if we want to calculate an SR score in ongoing studies, it is helpful to calculate sliding windows. For example, if we collect E at long intervals (several weeks or months between measurements), a single measurement of E may incompletely represent the stressors regularly faced by a given person. Calculating sliding windows e.g. as averages of 3 measurements can help create more representative measures.
+
+This rationale is described in detail in the FRESHMO paper [Kalisch et al.](https://www.frontiersin.org/articles/10.3389/fpsyg.2021.710493).
+
+#### 1.1.1 P & E sliding windows
+
+      Task 1.1.1 Calculate the average P and E scores for each 3-beep intervals (i.e., beep 1-3, beep 2-4, etc)
+
+```{r solution_E_P_sliding}
+
+# initiate empty variables
+ds$Mean.P_sliding<-NA
+ds$Mean.E_sliding<-NA
+ds$SR_sliding <- NA
+
+#beep 1-3
+ds$Mean.P_sliding[which(ds$beep<4)] <-
+  calc.mean(P, subject.ID, data=ds[which(ds$beep<4),], na.rm = T, expand=TRUE)
+ds$Mean.E_sliding[which(ds$beep<4)] <- 
+  calc.mean(E, subject.ID, data=ds[which(ds$beep<4),], na.rm = T, expand=TRUE)
+
+#beep 2-4
+ds$Mean.P_sliding[which(ds$beep>1 & ds$beep<5)] <-
+  calc.mean(P, subject.ID, data=ds[which(ds$beep>1 & ds$beep<5),], na.rm = T, expand=TRUE)
+ds$Mean.E_sliding[which(ds$beep>1 & ds$beep<5)] <- 
+  calc.mean(E, subject.ID, data=ds[which(ds$beep>1 & ds$beep<5),], na.rm = T, expand=TRUE)
+
+#beep 3-5
+ds$Mean.P_sliding[which(ds$beep>2 & ds$beep<6)] <-
+  calc.mean(P, subject.ID, data=ds[which(ds$beep>2 & ds$beep<6),], na.rm = T, expand=TRUE)
+ds$Mean.E_sliding[which(ds$beep>2 & ds$beep<6)] <- 
+  calc.mean(E, subject.ID, data=ds[which(ds$beep>2 & ds$beep<6),], na.rm = T, expand=TRUE)
+
+#beep 4-6
+ds$Mean.P_sliding[which(ds$beep>3)] <-
+  calc.mean(P, subject.ID, data=ds[which(ds$beep>3),], na.rm = T, expand=TRUE)
+ds$Mean.E_sliding[which(ds$beep>3)] <- 
+  calc.mean(E, subject.ID, data=ds[which(ds$beep>3),], na.rm = T, expand=TRUE)
+
+```
+
+#### 1.1.2 Calculate SR
+
+Now, calculate the SR score for the respective sliding windows. 
+Note that since we neither have a multilevel model nor quadratic effects, we do not need to go the round-about way of extracting intercept and slope and calculating the predicted scores.
+Instead, the residuals of the simple linear E-P line are the SR scores.
+
+      Task 1.1.2a  Calculate the SR score for the first sliding interval 
+        * Subset the first sliding interval and save in a separate variable
+        * Fit a linear E-P model to the average P and E scores in this interval
+        * Save the scaled residuals of this model and add to the original data frame
+
+
+```{r solution_sliding_SR_1_3}
+
+# You can use a separate data frame curset to join by ID, which makes sure the order is not messed up
+
+# We can just subset the data frame at the first beep, as we saved sliding windows in the data frame always respective to the first beep of the window 
+curset = subset(ds, beep==1)
+
+# fit a linear model in the subset
+m1 <- summary(lm(scale(Mean.P_sliding)~scale(Mean.E_sliding),data= curset))
+
+# extract scaled residuals as the SR score
+curset$SR_1 <-scale(resid(m1))
+
+# save in the original data frame ds
+ds$SR_sliding[which(ds$beep==1)] <-scale(resid(m1))
+
+# in addition to a variable "sliding" that combines all sliding scores, we also save the specific sliding scores per interval in a variable:
+ds <- join(ds, curset[c("subject.ID", "SR_1", "beep")])
+
+# note: sometimes, there can be conflicts between the packages "plyr" and "dplyr". Here, we need the package "plyr". If loading it above does not work, try reloading and potentially detaching dplyr
+
+# library("plyr)
+# detach("package:plyr", unload=TRUE)
+
+# then rerun: ds <- join(ds, curset[c("subject.ID", "SR_1", "beep")])
+
+```
+
+      Task 1.1.2b  Calculate sliding SR scores for the remaining three intervals 
+
+
+```{r solution_all_sliding}
+
+curset = subset(ds, beep==2)
+m1 <- summary(lm(scale(Mean.P_sliding)~scale(Mean.E_sliding),data= curset))
+curset$SR_2 <-scale(resid(m1))
+ds$SR_sliding[which(ds$beep==2)] <-scale(resid(m1))
+ds <- join(ds, curset[c("subject.ID", "SR_2", "beep")])
+
+curset = subset(ds, beep==3)
+m1 <- summary(lm(scale(Mean.P_sliding)~scale(Mean.E_sliding),data= curset))
+curset$SR_3 <-scale(resid(m1))
+ds$SR_sliding[which(ds$beep==3)] <-scale(resid(m1))
+ds <- join(ds, curset[c("subject.ID", "SR_3", "beep")])
+
+curset = subset(ds, beep==4)
+m1 <- summary(lm(scale(Mean.P_sliding)~scale(Mean.E_sliding),data= curset))
+curset$SR_4 <-scale(resid(m1))
+ds$SR_sliding[which(ds$beep==4)] <-scale(resid(m1))
+ds <- join(ds, curset[c("subject.ID", "SR_4", "beep")])
+
+```
+
+#### 1.1.3 Correlations and stability
+
+      Task 1.1.3a  Calculate correlations between E, E_sliding, E_t1_t6, P, and P sliding 
+
+```{r solution_sliding_cors}
+# here we just calculate all the different correlations
+ds %>%  
+  ungroup() %>% 
+  select(E, Mean.E_sliding, E_t1.t6, P, Mean.P_sliding) %>% 
+  cor(., use="pairwise.complete.obs")
+
+# here we plot the correlations with ggcorrplot
+ds %>%  
+  ungroup() %>% 
+  select(E, Mean.E_sliding, E_t1.t6, P, Mean.P_sliding) %>% 
+  cor(., use="pairwise.complete.obs")%>%  
+  ggcorrplot::ggcorrplot(
+                          show.legend = TRUE, type="lower", method = "circle", lab=TRUE,
+                          ggtheme = ggplot2::theme_classic)
+
+
+```
+
+We can see that for the timeframe here, E_sliding correlates equally with E per timepoint and with the average E over all timepoints.
+P_sliding correlates slightly more with the average E per sliding window and over the time interval than with the individual E. Individual P per timepoints correlates equally with all E.
+
+We often observe better correlations between P and E averaged over multiple timepoints, presumably reflecting that the averaged scores better represent the actual amount of stressors faced (while individual scores include more noise). That pattern is often much more pronounced than here.
+
+      Task 1.1.3b Plot E, E_sliding, P and P_sliding per subject over time, using the lattice function "xyplot" 
+
+Note: in the console, you may have to use the function "zoom" to see the plots properly
+
+```{r solution_sliding_plots}
+
+lattice::xyplot(ds$P ~ as.factor(ds$beep)| ds$subject.ID, data = ds, type = c("p", "l"), col ="blue", col.line="black", xlab="beep", ylab="P", main="P per beep")
+
+lattice::xyplot(ds$Mean.P_sliding ~ as.factor(ds$beep)| ds$subject.ID, data = ds, type = c("p", "l"), col ="blue", col.line="black", xlab="beep", ylab="P", main="P sliding")
+
+lattice::xyplot(ds$E ~ as.factor(ds$beep)| ds$subject.ID, data = ds, type = c("p", "l"), col ="blue", col.line="black", xlab="beep", ylab="P", main="E per beep")
+
+lattice::xyplot(ds$Mean.E_sliding ~ as.factor(ds$beep)| ds$subject.ID, data = ds, type = c("p", "l"), col ="blue", col.line="black", xlab="beep", ylab="P", main="E sliding")
+
+```
+
+      Task 1.1.3c Plot SR and SR_sliding per subject over time, using the lattice function "xyplot" 
+
+```{r solution_sliding_plots}
+
+lattice::xyplot(ds$SR ~ as.factor(ds$beep)| ds$subject.ID, data = ds, type = c("p", "l"), col ="blue", col.line="black", xlab="beep", ylab="P", main="SR per beep")
+
+lattice::xyplot(ds$SR_sliding ~ as.factor(ds$beep)| ds$subject.ID, data = ds, type = c("p", "l"), col ="blue", col.line="black", xlab="beep", ylab="SR", main="SR sliding")
+
+```
+
+As expected, the sliding windows produce much smoother trajectories - which may or may not be desired, depending on the data quality and research question.
+
+TIP: in some cases, it can also be desired to build an SR for one sliding window, and then recycle this E-P line to apply to subsequent windows. Building such a reference line can be used to track actual group-level changes in SR over time, e.g. relative to a given baseline.
+
+
+## 2 Dealing with outliers and non-normality
+
+In the SR score basics script, you have already identified some outliers in E and P data. Whenever you identify striking outliers, it is important to first confirm that they are 'real' values, e.g., they are not the results of typos (like an additional 0, turning a 10 into 100). If examining longitudinal data, you could also confirm that the person in question routinely scored higher than other.
+
+With mental health data, it is common to have skewed data and even some subjects that score significantly higher on P than others. Assuming that there are no errors in the data, these present valuable information for mental health and resilience research and should, ideally, not be removed from your dataset. However, you still have to make sure that these outliers do not impair your model fit.
+
+### 2.1 Checking the E-P fit
+
+First, you should identify whether there are outliers or issues with the data distribution that could be affecting the E-P fit.
+
+For this section, work with the P and E scores
+
+      Task 2.1a: Calculate diagnostic statistics
+      * Calculate Cook's distance of your E-P model
+      * Plot fitted values against residuals of your E-P model
+      * Build a QQ plot of your E-P model residuals
+      
+      Task 2.1b: Interpret the scores
+      * Are there any influential cases for your E-P line in the data? 
+      * Are the residuals normally distributed?
+      * Would you treat the sample for outliers?
+
+Tip: You can use the following functions: 
+- plot(cooks.distance(model)) 
+- "fitted(model)" for fitted values and "resid(model)" for model residuals
+- qqnorm(residuals)
+      
+#### 2.1.1 Cooks distance
+
+```{r solution_Cooks}
+# First, re-fit the E-P model from above and save the model as an object (rather than the summary data) 
+
+EP_norm_model <- ds %>%
+  group_by(subject.ID) %>%
+
+      # specify a model with a random effect for each subject
+  lme4::lmer(scale(P)~scale(E_scaled)+ (1+scale(E_scaled)|subject.ID),data=.)
+
+EP_norm_model
+
+# The summary of the model object should give you the same result as above
+summary(EP_norm_model)
+
+# we then check for influential cases. Any cases with a Cooks distance > 1 are normally considered overly influential. You should also examine the plot itself and whether any Cooks distance values visually appear a lot higher than the others 
+plot(cooks.distance(EP_norm_model))
+```
+
+Some Cooks distance values are > 1, indicating issues
+
+#### 2.1.2  residual vs. fitted plot
+
+Residual plots are often used to assess whether or not the residuals in a regression analysis are normally distributed and whether or not they exhibit heteroscedasticity.
+
+Next, we will produce a residual vs. fitted plot, which is helpful for visually detecting heteroscedasticity – e.g. a systematic change in the spread of residuals over a range of values. 
+
+```{r solution_fitted_residuals}
+# plot residuals against fitted values
+plot(fitted(EP_norm_model), resid(EP_norm_model))
+#add a horizontal line at 0 
+abline(0,0)
+```
+
+The x-axis displays the fitted values and the y-axis displays the residuals. From the plot we can see that the spread of the residuals tends to be slightly higher for fitted values in the mid-range, but it looks evenly spread overall.
+
+#### 2.1.3 Q-Q plot
+
+We can also produce a Q-Q plot, which is useful for determining if the residuals follow a normal distribution. If the data values in the plot fall along a roughly straight line at a 45-degree angle, then the data is normally distributed.
+
+```{r solution_qqplots}
+#create Q-Q plot for residuals
+qqnorm(resid(EP_norm_model))
+#add a straight diagonal line to the plot
+qqline(resid(EP_norm_model)) 
+```
+
+We can see that the residuals tend to stray from the line quite a bit near the tails, which indicates that they’re heavy tailed.
+
+#### 2.1.4 density plot
+
+We can also produce a density plot, which is also useful for visually checking whether or not the residuals are normally distributed. If the plot is roughly bell-shaped, then the residuals likely follow a normal distribution.
+
+```{r solution_density}
+#Create density plot of residuals
+plot(density(resid(EP_norm_model)))
+```
+
+We can see that the density plot pretty closely follows a bell shape.
+
+In sum:
+
+      * Are there influential cases for your E-P line in the data? 
+  _Some Cooks distance values are > 1, indicating the presence of overly influential datap oints for our E-P line_
+
+      * Are the residuals normally distributed?
+  _The residuals are cloase to  normally distributed (although the qq plot indicated heavy tails)_
+
+      * Would you treat the sample for outliers?
+  _There may be a subset of higher values in the sample, but not a lot of evidence for significant outliers. We may thus explore whether outlier treatment improves the model fits (to ensure that the residuals are more normally distributed)._
+
+If you do detect outliers in your sample that influence your model fit, there are three solutions:
+
+1. Exclude outliers
+2. Winsorize outliers
+3. Fit E-P without outliers
+
+### 2.2 Excluding outliers
+
+If you are unsure whether the outliers identified in your sample may be due to erroneous responses, excluding them can be a good solution.
+
+often, values > 3 standard deviations (SD) above or below the sample mean are considered outliers
+
+      Task 2.2a: Define upper and lower boundry of P and E scores as sample mean + 3 SD.
+
+```{r solution_excluding_outliers}
+
+  P_upr = mean(ds$P, na.rm = T)+3*sd(ds$P, na.rm = T)
+  P_lwr = mean(ds$P, na.rm = T)-3*sd(ds$P, na.rm = T)
+
+  E_upr = mean(ds$E, na.rm = T)+3*sd(ds$E, na.rm = T)
+  E_lwr = mean(ds$E, na.rm = T)-3*sd(ds$E, na.rm = T)
+```
+  
+      Task 2.2b: 
+      *scale P and E values and save them as separate variables in the data frame. Identify measurements of at least 3 SDs above/below the sample mean.
+      *create a new df in which you exclude all values that are at least 3 SDs above / below the sample mean.
+      *re-fit the E-P line
+      *check if there are still influential cases and compare to the previous model including outliers
+  
+      
+```{r solution_scale}
+
+# first scale P and E values. 
+
+ds$scale_P <- scale(ds$P)
+ds$scale_E <- scale(ds$E)
+
+# Remember that "scaled_E" is the sum of scaled Ec and Eg values - which is not the same as scaling the raw summed scores
+
+```
+
+Exclude all data points at which subjects score 3 SD >= mean:
+
+```{r solution_excl}
+# identify subjects with absolute values of =>3. For scaled data, this represents > 3 SD above/below the sample mean 
+excl_P <- which(abs(ds$scale_P)>=3)
+excl_E <- which(abs(ds$scale_E)>=3)
+
+ds_no_outlier <- ds[-c(excl_P, excl_E),]
+```
+
+Re-fit the E-P line. 
+
+```{r solution_excluding_outliers}
+
+# Re-fit the E-P model from above and to the new dataframe save the model as an object 
+
+EP_norm_model_excl <- ds_no_outlier %>%
+  group_by(subject.ID) %>%
+
+    # specify a model with a random effect for each subject
+  lme4::lmer(scale(P)~scale(E)+ (1+scale(E)|subject.ID),data=.)
+
+EP_norm_model_excl
+
+# The summary of the model object should still give you a similar result as above
+summary(EP_norm_model_excl)
+
+```
+
+
+```{r influential_cases_residuals_2}
+# check for influential cases. 
+plot(cooks.distance(EP_norm_model_excl))
+# compare to the previous model
+plot(cooks.distance(EP_norm_model))
+
+# check for influential cases. 
+hist(cooks.distance(EP_norm_model_excl))
+# compare to the previous model
+hist(cooks.distance(EP_norm_model))
+
+# plot residuals against fitted values
+plot(fitted(EP_norm_model_excl), resid(EP_norm_model_excl))
+abline(0,0)
+# compare with old fit
+plot(fitted(EP_norm_model), resid(EP_norm_model))
+abline(0,0)
+
+#create Q-Q plot for residuals
+qqnorm(resid(EP_norm_model_excl))
+qqline(resid(EP_norm_model_excl))
+
+# compare with old fit
+qqnorm(resid(EP_norm_model))
+qqline(resid(EP_norm_model))
+
+```
+
+The Cook's distance values are somewhat improved, though a few are still > 1
+Fat tails in the qqline are also slightly improved.
+
+Tip: you can also use the Mahalanobis distance to include mutidimensional outliers (i.e., outliers on multiple scales, here in E and P data) in one step
+
+```{r solution2_excluding_outliers}
+
+# calculate sum of E-P scores and covariance
+EP_data <- ds[,c("E","P")]
+EP_mean <- colMeans(EP_data)
+EP_cov <- cov(EP_data)
+
+# Calculate mahalanobis distance
+EP_md <- mahalanobis(EP_data, EP_mean, EP_cov)
+EP_p <- pchisq(EP_md, df=1, lower.tail=FALSE)
+ds$EP_md <- mahalanobis(EP_data, EP_mean, EP_cov)
+
+# Calculate significance
+ds$EP_p <- pchisq(EP_md, df=1, lower.tail=FALSE)
+
+# Select all variables with significant distance
+excl_MD <- which(ds$EP_p<=0.001)
+ds_no_outlier <- ds[-excl_MD,]
+
+```
+
+### 2.3 Winsorizing Outliers 
+
+As mentioned above, we want to avoid excluding high P or E scores from our data (among many reasons: to i) avoid censoring the data, ii) use as much data as possible (for ethical and statistical reasons), and iii) because these may be particularly interesting for resilience and mental health research questions)
+
+However, we still have to make sure that these outliers do not impair your model fit.
+
+Assuming that there are no errors in the data, one way to maintain their information is to "winsorize" rather than exclude these data.
+This means replacing those values > 3 SD below/above the mean with exaclty the values *at* 3 SDs above / below the mean. 
+
+      Task 2.3a: Winsorize P and E data and save into new variables. 
+
+Tip: For our purposes here, you can just use the custom function "winsorize" (file Winsorize.r) provided 
+source("./progs/winsorize.r") # function from LP to winsorize
+
+
+```{r solution_winsorize}
+
+ds$P.w <- winsorize(ds$P)
+ds$E.w <- winsorize(ds$E)
+
+# check max values
+max(ds$P)
+max(ds$P.w)
+
+max(ds$E)
+max(ds$E.w)
+
+```
+
+Winsorizing successfully replaced the max values
+Now, you can rerun the above E-P model with the winsorized scores.  
+
+     Task 2.3b: Re-run E-P model and re-check influential cases and distributions (see 2.1.1-4) with the winsorized scores. 
+      Interpret the result: Are the influential cases removed and residuals now normally distributed?
+
+Refitting the E-P model
+
+```{r solution_winsorizing}
+
+# Re-fit the E-P model
+EP_norm_model_winz <- ds %>%
+  group_by(subject.ID) %>%
+
+    # specify a model with a random effect for each subject
+  lme4::lmer(scale(P.w)~scale(E.w)+ (1+scale(E)|subject.ID),data=.)
+
+EP_norm_model_winz
+
+# The summary of the model object should still give you a similar result as above
+summary(EP_norm_model_winz)
+
+```
+
+Checking distributions
+
+```{r influential_cases_residuals_2.3}
+# check for influential cases. 
+plot(cooks.distance(EP_norm_model_winz))
+# compare to the previous model
+plot(cooks.distance(EP_norm_model_excl))
+
+# check for influential cases. 
+hist(cooks.distance(EP_norm_model_winz))
+# compare to the previous model
+hist(cooks.distance(EP_norm_model_excl))
+
+# The difference is barely noticeble
+
+#create Q-Q plot for residuals
+qqnorm(resid(EP_norm_model_winz))
+qqline(resid(EP_norm_model_winz))
+# compare with old fit
+qqnorm(resid(EP_norm_model_excl))
+qqline(resid(EP_norm_model_excl))
+
+# tails appear a bit heavier in the winsorized fit
+
+```
+
+
+    Interpret the result: Are the influential cases removed and residuals now normally distributed?
+    
+  _the results are almost the same as when excluding the outliers, maybe the fit is slightly better when excluding values. You could now either choose to winsorize (maximising data inclusion) or exclude values (maximising a slightly better fit)_ 
+
+### 2.4 Fitting E-P without outliers
+
+We now have a (slightly) improved E-P fit that we can use to build a better SR score. 
+Because we want to manipulate the data as little as possible (but as much as necessary), we may not want to alter our original data.
+A more elegant solution can be to use the winsorized scores / outlier exclusion only to extract the E-P intercept and slope - but then apply them on the unaltered scores to calculate the SR score.
+
+In this way, we can ensure that the E-P model fits best for the majority of values without manipulation the actual data.
+
+#### 2.4.1 extract intercept and slope
+
+Extract the intercept and slope from the multilevel model (E-P from single time points)
+
+      Task 2.4.1 Save the intercept and slope from the multilevel model with winsorized data (2.3) in separate objects. 
+      
+```{r solution_slope}
+intercept.w  <- summary(EP_norm_model_winz)$coefficients[1]
+E_slope_winz <- summary(EP_norm_model_winz)$coefficients[2]
+
+E_slope_winz
+
+# original slope without winsorizing
+E_slope_multi
+```
+
+The original slope is slightly steeper than the new one based on winsorized scores
+
+
+#### 2.4.2 predicted P
+
+We use the extracted intercept and slope to calculate the predicted P based on their E, using a linear equation (y=slope*x+intercept)
+
+The E in the equation needs to be scaled. 
+
+      Task 2.4.2 Calculate the predicted P based on a linear equation, store it as a variable in the dataset
+      
+```{r solution_predPmulti}
+ ds$P_pred.w<- intercept.w  + scale(ds$E)*E_slope_multi  
+```
+
+#### 2.4.3 SR score
+
+The SR score is then the difference between the actual P and the predicted P, that is the residual of each P to the normative E/P line. 
+
+      Task 2.4.3 Calculate the difference between actual P and predicted P for each participant, based on intercept + slope for winsorized data
+      Correlate this SR score with the non-winsorized SR
+
+```{r solution_sr}
+ ds$SR.w <- scale(scale(ds$P) - ds$P_pred.w)
+
+  cor(ds$SR, ds$SR.w)
+```
+
+### 2.5 Notes on further advanced SR approaches
+
+As the SR score is based on residuals, a well-fitting E-P model is crucial for a reliable score. In this sample the fit was already pretty good (despite some smaller influential cases).
+
+However, depending on your sample and E & P measurements, it is possible that your data are so skewed that you will not be able to derive a well fitting model with the above methods (e.g., when a small subset of subjects are exposed to much more stressors than others, or there is zero-inflation in E because only severe LEs are measured in E). In such cases, you may also consider other approaches to getting a well-fitting E-P line, such as non-linear or data-driven E-P model fitting (see e.g., [Hettwer et al., 2024](https://www.nature.com/articles/s41467-024-50292-2 )
+
+Is is also not always necessary to equally weight all stressors included in the SR calculation (which we implicitly do by scaling and then averaging Eg and Ec scores). We generally take the scale-and-sum approach when we have a conceptual reason to include different types of stressors with equal weighting.
+A more data driven approaches that weight stressors differently and optimize explained variance can also be used - but have their own pitfalls (e.g., conceptual issues or inflated explained variance due to mood congruency effects in some stressor measurements but not others).
+
+In general, many approaches to clean your data and improve measurement accuracy can be used to improve your SR score (e.g., data imputation, excluding subjects with reponse invariance or other suspicious answering patterns, etc. etc.)
+
+## 3 E Severity vs count method 
+
+In this sample, we have calculated the SR score using the severity-rated stressors.
+However, in some situations it can also be helpful to create an SR score based on the mere count of occurence of stressors (stressor count method, SCM)
+
+### 3.1 Count scoring E
+
+      Task 3.1a Calculate E sum scores as the mere count of occurence of stressors (i.e., stressors rated > 0) and store as a variable in the dataset
+
+```{r solutions_count_method}
+
+#Corona pandmic related stressors:
+term <- "CE_"
+CE <- grep(term, names(ds))
+# initiate variable
+ds$Ec.SCM <- NA
+ds$Ec.SCM <- rowSums(ds[CE] >0, na.rm=TRUE) #stressor count
+
+#general stressors:
+term <- "GE_"
+GE <- grep(term, names(ds))
+ds$Eg.SCM <- NA
+ds$Eg.SCM <- rowSums(ds[GE] >0, na.rm=TRUE) #stressor count
+
+```
+
+      Task 3.1b Calculate combined E score (based on scaled Ec.SCM and Eg.SCM) and save in a separate variable
+      
+```{r solutions_E_count_sum}
+
+  ds <- ds  %>% 
+  ungroup %>% 
+  # here we are scaling across all time points and all participants
+  mutate(Eg_scaled.SCM= scale(Eg.SCM),
+         Ec_scaled.SCM=scale(Ec.SCM)) %>% 
+dplyr::group_by(subject.ID) %>% 
+  # because we are creating the mean by rows and not by column
+  rowwise() %>% 
+  dplyr::mutate(E_scaled.SCM=mean(c(Eg_scaled.SCM,Ec_scaled.SCM),na.rm = T))%>% 
+  # this is important to make revert the rowise operator
+  ungroup %>%  
+  dplyr::group_by(subject.ID) 
+```
+
+      Task 3.1c Correlate E scores and E SCM scores to check how much they differ
+
+```{r solutions_cor_count_method}
+
+# Corona pandmic related stressors:
+cor(ds$Ec.SCM, ds$Ec, use="pairwise.complete.obs") 
+
+# general stressors:
+cor(ds$Eg.SCM, ds$Eg, use="pairwise.complete.obs") 
+
+# combined scaled score:
+cor(ds$E_scaled.SCM, ds$E_scaled, use="pairwise.complete.obs") 
+
+```
+
+All scores correlate highly but not perfectly
+
+### 3.2 SR based on count scores
+
+      Task 3.2a Use the E count score to fit the E-P line (multilevel model), extract the intercept and slope and compare to the original slope (E_slope_multi)
+
+```{r solutions_count_method_sr}
+
+# Re-fit the E-P model
+EP_norm_model_scm <- ds %>%
+  group_by(subject.ID) %>%
+
+    # specify a model with a random effect for each subject
+  lme4::lmer(scale(P)~scale(E_scaled.SCM)+ (1+scale(E_scaled.SCM)|subject.ID),data=.)
+
+
+intercept.scm <- summary(EP_norm_model_scm)$coefficients[1]
+E_slope.scm <- summary(EP_norm_model_scm)$coefficients[2]
+
+E_slope.scm
+
+# compare to original slope 
+E_slope_multi
+```
+
+The slope based on severity scoring is a lot steeper than the one fit based on SCM, reflecting the stronger relationship to P
+
+      Task 3.2b Calculate SR score based on count score and compare with original severity based score
+
+```{r solutions_count_method_sr2}
+
+ds$P_pred.scm <- intercept.scm  + scale(ds$E_scaled.SCM)*E_slope.scm  
+
+ds$SR.SCM <- scale(scale(ds$P) - ds$P_pred.scm)
+
+cor(ds$SR.SCM, ds$SR)
+```
+
+Both SR scores are very highly correlated.
+
+      Task 3.2c Plot correlations between count based E, Severity based E, P, and SR based on both E measures
+
+```{r solution_corr_count}
+# here we just calculate all the different correlations
+ds %>%  
+  ungroup() %>% 
+  select(E_scaled, E_scaled.SCM, P, SR, SR.SCM) %>% 
+  cor(., use="pairwise.complete.obs")
+
+# here we plot the correlations with ggcorrplot
+ds %>%  
+  ungroup() %>% 
+  select(E_scaled, E_scaled.SCM, P, SR, SR.SCM) %>% 
+  cor(., use="pairwise.complete.obs")%>%  
+  ggcorrplot::ggcorrplot(
+                          show.legend = TRUE, type="lower", method = "circle", lab=TRUE,
+                          ggtheme = ggplot2::theme_classic)
+
+```
+
+Overall, although the coutn based E correlates much less with P, both SR scores (SCM and Severity based) are highly correlated.
+
+In general, the severity ratings include an element of personal stressor appraisal that may confound later relationship with resilience factors, such as positive appraisal style.
+Therefore, the use of the count based method is preferred whenever stressors are measured comprehensively. However, when only a subset of stressors is measured for brevity (as was the case in DynaCORE-L), including the severity ratings in the scores can help capture stressors more comprehensively.
+
+This rationale is also explained in detail in the supplements of [Veer et al., 2021](https://pubmed.ncbi.nlm.nih.gov/33479211/)
+
