@@ -55,7 +55,7 @@ In Dynacore-L we have two types of stressors, Corona-related stressors and Gener
 
 CE_30 and GE_12 are open questions and are not used for this scoring. 
 
-      Task 1a: Find stressor items in the dataset and look at this subset. Check that the range of the items is as expected. 
+      Task 1a: Find stressor items in the dataset and look at this subset of variables. Check that the range of the items is as expected. 
       
 ```{r solution_identify_E}
 
@@ -80,7 +80,7 @@ As P we have the GHQ (CM in the dataset).
 
 CM : 0-3, where 0 is did not happen.
 
-      Task 1b: Find mental health items in the dataset and look at this subset. Check that the range of the items is expected. 
+      Task 1b: Find mental health items in the dataset and look at this subset of variables. Check that the range of the items is expected. 
       
 ```{r solution_identify_P}
 
@@ -133,7 +133,7 @@ Dependent on your data set you might have different considerations on how you wi
 
 If you have different type of stressors within the same data set, for example, life events and daily hassles, or general and pandemic stressors, you will in most cases want to built separate sum scores for each type of stressor first. 
 
-      Task 1.1.2a: Create two sum scores, one for the general stressors (Eg), one for the corona-related stressors (Ec). 
+      Task 1.1.2a: Create two sum scores, one for the general stressors (Eg), one for the corona-related stressors (Es). 
       
 ```{r solutions_ec_eg}
 
@@ -147,7 +147,7 @@ ds <- ds %>%
       # here we specify that if there is an NA value it is removed
       na.rm = T),
     # now we calculate a separate E for the pandemic stressors
-    Ec=base::rowSums(
+    Es=base::rowSums(
       # with across we specify what columns are summed
       across(c(CE_01:CE_29)),
       # here we specify that if there is an NA value it is removed
@@ -159,12 +159,12 @@ ds <- ds %>%
 
 #### 1.1.3 to scale or not to scale?
 
-Now the question is how could one combine the E scores. Usually, you want to built the SR score based on the most information available, meaning all types of available stressors. There are two options: you could simply sum all items)
+Now the question is how could one combine the E scores. Usually, you want to built the SR score based on the most information available, meaning all types of available stressors. There are two options: 
 
-1. you could sum all items. This works when all stressors are measured or coded the same way (for example all of them indicate occurrence). This would mean that if the type of stressors are not equally represented, the one type for which there are more items will be weighted more. In our example, there are more CE (29 items) then general stressors (11 items). 
+1. you could sum all items. This works when all stressors are measured or coded the same way and on the same scale(for example all of them indicate occurrence). This would mean that if the type of stressors are not equally represented, the one type for which there are more items will be weighted more. In our example, there are more CE (29 items) then general stressors (11 items). 
 2. you could create a mean of the scaled sum scores. this would allow both type of stressors to be equally weighted. This is the approach we have used in MARP and LORA which is described in the [FRESHMO paper](https://www.frontiersin.org/articles/10.3389/fpsyg.2021.710493). 
 
-      Task 1.1.3: create a scaled combined E score (E_scaled)
+      Task 1.1.3: create a scaled combined E score (E_scaled) 
 
 ```{r solution_scaled_E}
 
@@ -172,11 +172,11 @@ ds <- ds  %>%
   ungroup %>% 
   # here we are scaling across all time points and all participants
   mutate(Eg_scaled= scale(Eg),
-         Ec_scaled=scale(Ec)) %>% 
+         Es_scaled=scale(Es)) %>% 
 dplyr::group_by(subject.ID) %>% 
   # because we are creating the mean by rows and not by column
   rowwise() %>% 
-  dplyr::mutate(E_scaled=mean(c(Eg_scaled,Ec_scaled),na.rm = T))%>% 
+  dplyr::mutate(E_scaled=mean(c(Eg_scaled,Es_scaled),na.rm = T))%>% 
   # this is important to make revert the rowwise operator
   ungroup %>%  
   dplyr::group_by(subject.ID) 
@@ -189,7 +189,7 @@ SR is expected to be quite stable and change over longer periods of times. That 
 Consequently, in longitudinal studies we are often interested in longer time periods rather than single time points. For example in the longitudinal samples MARP and LORA we look at period of 9 months to ca. 3.5 years [see Petri-Romão et al.](https://osf.io/dgx4k). 
 For this purpose we create the mean stressor exposure and mean P in the time period of interest. 
 
-      Task 1.1.4a: Create mean E scores (Eg_t1.t6, Ec_t1.t6) across all timepoints
+      Task 1.1.4a: Create mean E scores (Eg_t1.t6, Es_t1.t6) across all timepoints
       
 ```{r solution_Et1_t6}
 
@@ -202,8 +202,8 @@ ds <- ds %>%
       # here we specify that if there is an NA value it is removed
       na.rm = T),
     # now we calculate a separate E for the pandemic stressors
-    Ec_t1.t6 =base::mean(
-      Ec,
+    Es_t1.t6 =base::mean(
+      Es,
       # here we specify that if there is an NA value it is removed
       na.rm = T)
   ) 
@@ -228,7 +228,7 @@ ds <- ds %>%
 
 In the case of the combined E score the order of operations is as follows
 
-1. create mean sum scores for each time period (separately for Eg, Ec)
+1. create mean sum scores for each time period (separately for Eg, Es)
 2. scale each separate sum score. This means we are scaling over the time period of interest
 3. create combined mean score of the scaled scores
 
@@ -247,13 +247,13 @@ ds <- ds %>%
       # we mean the already calculated sum score (see previous chunk)
       Eg_t1.t6),
     # now we calculate a separate E for the pandemic stressors
-    Ec_t1.t6_scaled = scale(
-      Ec_t1.t6)
+    Es_t1.t6_scaled = scale(
+      Es_t1.t6)
   ) %>% 
   # now we create a combined mean score
   group_by(subject.ID) %>% 
   mutate(
-    E_t1.t6_scaled = base::mean(c(Eg_t1.t6_scaled, Ec_t1.t6_scaled), na.rm=TRUE)
+    E_t1.t6_scaled = base::mean(c(Eg_t1.t6_scaled, Es_t1.t6_scaled), na.rm=TRUE)
   )
 
 ```
@@ -267,7 +267,7 @@ First we check that our scores are reasonable. Plotting and summarising the scor
       EXTRA: plot the scores. (e.g. scatter, histogram, boxplot...)
       
       Task 1.2b: Interpret your results
-      * did you do everything correctly? 
+      * did you do everything correctly? or are there strange scores, eg. outside of the possible range?
       * do you think there are outliers?
 
 ```{r solution_describeEP}
@@ -275,14 +275,14 @@ First we check that our scores are reasonable. Plotting and summarising the scor
 ds %>% 
   ungroup() %>% 
   # select the variables you want to look at 
-  select(E,E_scaled, Ec, Eg, E_t1.t6, Ec_t1.t6, Eg_t1.t6,E_t1.t6_scaled, Ec_t1.t6_scaled, Eg_t1.t6_scaled, P) %>% 
+  select(E,E_scaled, Es, Eg, E_t1.t6, Es_t1.t6, Eg_t1.t6,E_t1.t6_scaled, Es_t1.t6_scaled, Eg_t1.t6_scaled, P) %>% 
   skimr::skim()
 
 ## Plotting ###
 
 ds %>% 
   group_by(subject.ID) %>% 
-  select(subject.ID,E,E_scaled, Ec, Eg, E_t1.t6, Ec_t1.t6, Eg_t1.t6,E_t1.t6_scaled, Ec_t1.t6_scaled, Eg_t1.t6_scaled, P) %>% 
+  select(subject.ID,E,E_scaled, Es, Eg, E_t1.t6, Es_t1.t6, Eg_t1.t6,E_t1.t6_scaled, Es_t1.t6_scaled, Eg_t1.t6_scaled, P) %>% 
   # we need to reformat the dataset for easier plotting in ggplot, but you can also skip this if you want to plot them separately
   pivot_longer(-subject.ID) %>% 
   # plotting happens here
@@ -307,8 +307,8 @@ We want to choose an E score based on a robust (that is high and interpretable) 
 
       Task 1.3b: Interpret the scores
       * which E score has the highest correlation with P?
-      * what do the separate E scores' correlations tell you about their influence on P? (is Eg or Ec more important)
-      * does the scaling have an impact on the relationship?
+      * what do the separate E scores' correlations tell you about their influence on P? (is Eg or Es more important)
+      * does the scaling of different E types before summation have an impact on the relationship?
       * what could be a reason to choose separate scores rather than combined scores?
       * which E score would you use?
 
@@ -318,13 +318,13 @@ We want to choose an E score based on a robust (that is high and interpretable) 
 # here we just calculate all the different correlations
 ds %>%  
   ungroup() %>% 
-  select(E,E_scaled, Ec, Eg, P) %>% 
+  select(E,E_scaled, Es, Eg, P) %>% 
   cor(., use="pairwise.complete.obs")
 
 # here we plot the correlations with ggcorrplot
 ds %>%  
   ungroup() %>% 
-  select(E,E_scaled, Ec, Eg, P) %>% 
+  select(E,E_scaled, Es, Eg, P) %>% 
   cor(., use="pairwise.complete.obs")%>%  
   ggcorrplot::ggcorrplot(
                           show.legend = TRUE, type="lower", method = "circle", lab=TRUE,
@@ -333,13 +333,13 @@ ds %>%
 # here we calculate the correlations of the average E and P in t1-t6
 ds %>%  
   ungroup() %>% 
-  select(E_t1.t6, Ec_t1.t6, Eg_t1.t6,E_t1.t6_scaled, P_t1.t6) %>% 
+  select(E_t1.t6, Es_t1.t6, Eg_t1.t6,E_t1.t6_scaled, P_t1.t6) %>% 
   cor(., use="pairwise.complete.obs")
 
 # here we plot again
 ds %>%  
   ungroup() %>% 
-  select(E_t1.t6, Ec_t1.t6, Eg_t1.t6,E_t1.t6_scaled, P_t1.t6)%>%  
+  select(E_t1.t6, Es_t1.t6, Eg_t1.t6,E_t1.t6_scaled, P_t1.t6)%>%  
   stats::cor(., use = "pairwise.complete.obs") %>%  
   ggcorrplot::ggcorrplot(
                           show.legend = TRUE, type="lower", method = "circle", lab=TRUE,
@@ -351,17 +351,17 @@ Solution:
 * which E score has the highest correlation with P?
 _E_scaled has the highest relationship with P. E_t1.t6_scaled has the highest correlation with P_t1.t6_
 
-* what do the separate E scores' correlations tell you about their influence on P? (is Eg or Ec more important)
-_Ec has lower relationship with P than Eg. But Ec has a higher correlation with E, which makes sense, since there are more items that go into E._ 
+* what do the separate E scores' correlations tell you about their influence on P? (is Eg or Es more important)
+_Es has lower relationship with P than Eg. But Es has a higher correlation with E, which makes sense, since there are more items that go into E._ 
 
-* does the scaling have an impact on the relationship?
-_Eg and Ec are equally correlated with E_scaled, which makes sense, since they are now equally weighted. Scaling actually increases the correlation with P_
+* does the scaling of different E types before summation have an impact on the relationship?
+_Eg and Es are equally correlated with E_scaled, which makes sense, since they are now equally weighted. The correlation is actually higher when we create a scaled E score_
 
 * what could be a reason to choose separate scores rather than combined scores?
 _in specific times, such as the pandemic, we might have hypotheses regarding the differential impact of distinct type of stressors on P_
 
 * which E score would you use?
-_for simplicity we will proceed with E and E_t1.t6 without scaling_
+_for simplicity we will proceed with E and E_t1.t6 without scaling, this is also more closely aligned with the analyses in Dynacore-L_
 
 ## 2 Model for normative stressor reactivity
 
@@ -379,9 +379,10 @@ Usual considerations
 In cross-sectional samples you will always have to use simple modelling. 
 However, in longitudinal samples you can either use multilevel modelling or choose to average over all time points to use simple modelling. The resulting SR scores usually are highly correlated and it is mostly a conceptual distinction. 
 
-In ongoing studies we have so far used the second appraoch, that is averaging over time points and building simple models. 
+In studies were data collection is ongoing studies we have so far used the second appraoch, that is averaging over time points and building simple models. See the FRESHMO paper [Kalisch et al.](https://www.frontiersin.org/articles/10.3389/fpsyg.2021.710493)
+For further details refer to the advanced sr script, where the use of a "reference time period" is discussed. 
 
-In studies where you compare different time points, for example intervention studies, we have chosen multilevel modelling (see [Petri-Romão et al. (2024)](https://osf.io/dgx4k))
+In studies where you compare different time points, for example intervention studies, we have chosen multilevel modelling (see [Petri-Romão et al. (2024)](https://osf.io/dgx4k)). In completed studies we have also used multilevel modelling, see [Boegemann et al. in 2022](https://mental.jmir.org/2023/1/e46518)
 
 #### 2.1.1 simple modelling
 
@@ -414,6 +415,8 @@ EP_norm
 Multilevel modelling allows us to build models with repeated measures of E and P. 
 It has been used in Dynacore-L and the RESPOND-RCT intervention study. 
 It is particularly useful when the study is completed and if averaging would obscure the effect of interest. 
+
+Note that in this example the mixed model results in an (almost / near) singular fit, probably because the inclusion of random slopes overfits the data. However, for SR calculation, we do not interpret the overall model fit and only use the fixed effects.
 
       Task 2.1.2 Build a multilevel model with the lmer function, specifying a random intercept for each subject. Save the output summary in an object. 
       
