@@ -15,9 +15,9 @@ output:
 
 Note: this is the advanced sr script.
 
-For your convenience, the "basic_sr" script is included again, as it forms the basis for the advanced calculations.
+For your convenience, the "basic_sr" script is included here again, as it forms the basis for the advanced calculations.
 
-To start with the advanced calculations, you can run everything up to "Part B".
+To start with the advanced calculations, you can run all code up to "Part B".
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE, warning = FALSE)
