@@ -11,3 +11,5 @@ You will also find a number of R Markdown scripts for the course:
 - advanced_sr_demo.Rmd
 
 - advanced_sr_worksheet.Rmd
+
+- trajectories.Rmd
